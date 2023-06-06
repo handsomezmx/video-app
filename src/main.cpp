@@ -1,5 +1,6 @@
 #include <stdio.h>
 #include <GLFW/glfw3.h>
+#include "video_reader.hpp"
 
 bool load_frame(const char* filename, int* width, int* height, unsigned char** data);
 
@@ -17,10 +18,9 @@ int main(int argc, const char** argv) {
         return 1;
     }
 
-    int frame_width, frame_height;
-    unsigned char* frame_data;
-    if (!load_frame("/Users/zhaomingxuan/Desktop/test.mp4", &frame_width, &frame_height, &frame_data)) {
-        printf("Couldn't load video frame\n");
+    VideoReaderState vr_state;
+    if(!video_reader_open(&vr_state,"/Users/zhaomingxuan/Desktop/test.mp4")){
+        printf("couldn't open video file");
         return 1;
     }
 
@@ -35,8 +35,12 @@ int main(int argc, const char** argv) {
     glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
     glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
     glTexEnvf(GL_TEXTURE_ENV, GL_TEXTURE_ENV_MODE, GL_MODULATE);
-    glTexImage2D(GL_TEXTURE_2D, 0, GL_RGB, frame_width, frame_height, 0, GL_RGBA, GL_UNSIGNED_BYTE, frame_data);
 
+
+    const int frame_width = vr_state.width;
+    const int frame_height = vr_state.height;
+    uint8_t* frame_data = new uint8_t[frame_width*frame_height*4];
+    
     while (!glfwWindowShouldClose(window)) {
         glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
 
@@ -47,6 +51,29 @@ int main(int argc, const char** argv) {
         glLoadIdentity();
         glOrtho(0, window_width, window_height, 0, -1, 1);
         glMatrixMode(GL_MODELVIEW);
+
+        //read a frame
+        int64_t pts;
+        if(!video_reader_read_frame(&vr_state,frame_data,&pts)){
+        printf("couldn't load video frame");
+        return 1;
+        }
+
+        static bool first_frame = true;
+        if(first_frame){
+            glfwSetTime(0.0);
+            first_frame = false;
+        }
+        double pt_in_seconds = pts * (double)vr_state.time_base.num/(double)vr_state.time_base.den;
+        while(pt_in_seconds>glfwGetTime()){
+            glfwWaitEventsTimeout(pt_in_seconds-glfwGetTime());
+        }
+
+
+
+        glBindTexture(GL_TEXTURE_2D,tex_handle);
+        glTexImage2D(GL_TEXTURE_2D, 0, GL_RGB, frame_width, frame_height, 0, GL_RGBA, GL_UNSIGNED_BYTE, frame_data);
+
 
         // Render whatever you want
         glEnable(GL_TEXTURE_2D);
@@ -60,9 +87,9 @@ int main(int argc, const char** argv) {
         glDisable(GL_TEXTURE_2D);
 
         glfwSwapBuffers(window);
-        glfwWaitEvents();
+        glfwPollEvents();
     }
-
+    video_reader_close(&vr_state);
     return 0;
 }
 
